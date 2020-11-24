@@ -1,0 +1,243 @@
+---
+title: "dbProj_dataCleaning"
+author: "Sara Haman"
+date: sys_time
+output: html_document
+---
+
+```{r, message=FALSE, warning=FALSE}
+
+# LIBRARIES 
+library(tidyverse)
+library(lubridate)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+pol2020 <- read_csv("countyPolitics2020.csv")
+ed <- read_csv("Education.csv")
+pop <- read_csv("PopulationEstimates.csv")
+unemp <- read_csv("Unemployment.csv")
+
+```
+
+```{r}
+
+# Tidying the county data
+countyCovid <- read_csv("countyCovidCases.csv")
+
+countyCovid$date <- as.Date(countyCovid$date, format = "%y-%m-%d")
+
+countyCovid$date <-month(countyCovid$date)
+
+countyCovid_new <- countyCovid %>%
+  group_by(fips, date) %>%
+  mutate(cases = max(cases), deaths = max(deaths)) %>%
+  distinct(date, fips, .keep_all=TRUE)
+
+countyCovid$fips <- as.numeric(countyCovid$fips)
+countyCovid_new$state <- state.abb[match(countyCovid_new$state,state.name)]
+countyCovid_new$county <- paste0(countyCovid_new$county , " County")
+
+# CREATING DC
+countyCovid_new <- countyCovid_new %>%
+  mutate(state = ifelse(fips == 11001 | fips == 11011, 'DC', state))
+
+# HANDLING THE UNNOWN FIPS, WHICH IS NEW YORK, ASSIGN ALL OF THEM TO MANHATTAN
+countyCovid_new <- countyCovid_new %>%
+  mutate(county = ifelse(is.na(fips), 'New York County', county), state = ifelse(is.na(fips), 'NY', state), fips = ifelse(is.na(fips), '36061', fips)) 
+
+# BECAUASE PR IS NOT ON THE MAP, WE DROP IT 
+countyCovid_new <- countyCovid_new[!(is.na(countyCovid_new$state)),]
+
+# CHECKING FOR NO NA'S 
+which(is.na(countyCovid_new), arr.ind=TRUE)
+
+
+write_csv(countyCovid_new, "DB_Covid.csv")
+
+```
+
+```{r}
+
+pol2016 <- read_csv("countyPolitics2016.csv")
+
+#Selecting correct data
+pol2016 <- pol2016[c(5,6,9,10,11)]
+pol2016 <- pol2016 %>% 
+  rename(
+    state = state_abbr,
+    fips = combined_fips,
+    county = county_name,
+    GOP_2016 = per_gop,
+    DEM_2016 = per_dem
+    )
+pol2016$fips <- as.numeric(pol2016$fips)
+
+```
+
+```{r}
+
+# Counting NA's 
+
+na_count <-sapply(pol2020, function(y) sum(length(which(is.na(y)))))
+na_count
+
+# Organizing the data 
+
+pol2020 <- pol2020[c(1,2,3,8,9)]
+pol2020$state_name <- state.abb[match(pol2020$state_name,state.name)]
+pol2020 <- pol2020 %>% 
+  rename(
+    state = state_name,
+    fips = county_fips,
+    county = county_name,
+    GOP_2020 = per_gop,
+    DEM_2020 = per_dem
+    )
+pol2020$fips <- as.numeric(pol2020$fips)
+pol2020
+```
+
+```{r}
+
+# POPULATION 
+
+pop <- pop[!is.na(pop$`Rural-urban_Continuum Code_2003`), ]
+pop <- pop[c(1,2,3, 5, 20)]
+pop <- pop %>% 
+  rename(
+    fips = FIPStxt,
+    state = State,
+    county = Area_Name,
+    ruralness = `Rural-urban_Continuum Code_2013`,
+    population = POP_ESTIMATE_2019
+    )
+pop$fips <- as.numeric(pop$fips)
+pop
+
+
+```
+
+```{r}
+
+# EDUCATION
+
+ed <- ed[!is.na(ed$`2003 Rural-urban Continuum Code`), ]
+ed <- ed[c(1,2,3,44:47)]
+ed <- ed %>% 
+  rename(
+    fips = `FIPS Code`,
+    state = State,
+    county = `Area name`,
+    below_highschool = `Percent of adults with less than a high school diploma, 2014-18`,
+    highschool = `Percent of adults with a high school diploma only, 2014-18`, 
+    some_college = `Percent of adults completing some college or associate's degree, 2014-18`,
+    college_or_higher = `Percent of adults with a bachelor's degree or higher, 2014-18`
+    )
+ed$fips <- as.numeric(ed$fips)
+ed
+```
+
+
+
+```{r}
+
+dem <- read_csv("Demographics2019.csv")
+
+dem <- dem %>%
+  filter(dem$AGEGRP == 0 & dem$YEAR == 12)
+
+dem$fips <- as.numeric(paste0(dem$STATE, dem$COUNTY))
+dem$male <- dem$TOM_MALE/dem$TOT_POP
+dem$female <- dem$TOM_FEMALE/dem$TOT_POP
+dem$white <- (dem$WA_FEMALE + dem$WA_MALE)/dem$TOT_POP
+dem$black <- (dem$BA_FEMALE + dem$BA_MALE)/dem$TOT_POP
+dem$natamer <- (dem$IA_FEMALE + dem$IA_MALE)/dem$TOT_POP
+dem$asian <- (dem$AA_FEMALE + dem$AA_MALE)/dem$TOT_POP
+dem$pacific <- (dem$NA_FEMALE + dem$IA_MALE)/dem$TOT_POP
+dem$tom <- (dem$TOM_MALE + dem$TOM_FEMALE)/dem$TOT_POP
+dem$hispanic <- (dem$H_MALE + dem$H_FEMALE)/dem$TOT_POP
+
+dem$STNAME <- state.abb[match(dem$STNAME,state.name)]
+
+dem
+dem <- dem[c(4,5,81:90)]
+
+dem <- dem %>%
+rename(
+  state = STNAME,
+  county = CTYNAME
+)
+
+dem[is.na(dem$state),1] <- "DC"
+
+```
+
+
+```{r}
+
+# UNEMPLOYMENT 
+
+unemp <- unemp[!is.na(unemp$Rural_urban_continuum_code_2013), ]
+unemp$area_name <- sapply(strsplit(unemp$area_name, ","), "[", 1)
+unemp <- unemp[c(1,2,3,86)]
+unemp <- unemp %>% 
+  rename(
+    fips = FIPStxt,
+    state = Stabr,
+    county = area_name, 
+    unemployment_rate = Unemployment_rate_2019
+    )
+unemp$fips <- as.numeric(unemp$fips)
+unemp
+```
+
+
+```{r}
+
+demographics <- merge(x = ed, y = pop, by = c("fips", "state", "county"), all.x = TRUE) %>%
+  merge(y = dem, by = c("fips", "state", "county"), all.x = TRUE) %>%
+  merge(unemp, by = c("fips", "state", "county"), all.x = TRUE)
+
+politics <- merge(pol2020, pol2016, by = c("fips", "state", "county"), all.x = TRUE)
+politics
+
+```
+
+```{r}
+
+# HANDLING EXCESS NA'S 
+# which(is.na(demographics), arr.ind=TRUE)
+demographics[is.na(demographics)] <- 0
+demographics <- demographics[!(demographics$state == 'PR'),]
+
+
+# which(is.na(demographics), arr.ind=TRUE)
+
+# DROP WHERE STATE IS MISSING, EITHER PR OR DATA IMPUTED INCORRECTLY (I.E., FIPS OF 2901 DOES NOT EXIST)
+# which(is.na(politics), arr.ind=TRUE)
+
+politics <- politics[!(is.na(politics$state)),]
+politics <- politics[!(politics$fips == 0),]
+politics[is.na(politics$GOP_2020),] <- 0
+politics[is.na(politics$DEM_2016),] <- 0
+
+politics[politics$fips == 0,]
+
+```
+
+
+```{r}
+
+write_csv(demographics, "db_demographics_covid2.csv")
+write_csv(politics, "db_politics_covid.csv")
+write_csv(countyCovid_new, "db_covid_cd.csv")
+
+```
+
+```{r}
+unique(countyCovid_new$fips)
+```
+
